@@ -1,0 +1,6 @@
+/Users/alexanderwilson/Documents/GitHub/llvm-pass-mem-usage/build/CMakeFiles/rebuild_cache.dir
+/Users/alexanderwilson/Documents/GitHub/llvm-pass-mem-usage/build/CMakeFiles/edit_cache.dir
+/Users/alexanderwilson/Documents/GitHub/llvm-pass-mem-usage/build/CMakeFiles/intrinsics_gen.dir
+/Users/alexanderwilson/Documents/GitHub/llvm-pass-mem-usage/build/skeleton/CMakeFiles/rebuild_cache.dir
+/Users/alexanderwilson/Documents/GitHub/llvm-pass-mem-usage/build/skeleton/CMakeFiles/edit_cache.dir
+/Users/alexanderwilson/Documents/GitHub/llvm-pass-mem-usage/build/skeleton/CMakeFiles/SkeletonPass.dir
