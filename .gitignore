@@ -31,5 +31,6 @@
 *.out
 *.app
 
-# LLVM Build
+# Project Directories
 /build/
+/.vscode/*
