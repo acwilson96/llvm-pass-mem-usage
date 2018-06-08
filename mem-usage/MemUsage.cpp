@@ -16,24 +16,20 @@ namespace {
         static char ID;
         MemoryUsage() : ModulePass(ID) {}
         virtual bool runOnModule(Module &M) {
-            SmallVector<Value*, 64> globalVariables;
-
             errs() << "In a Module called " << M.getName() << "\n";
-            
-            int globalUsage = getGlobalsUsage(M);
-            
-            errs() << "\nLooking at Functions:" << "\n";
-            for (Function &Function: M.getFunctionList()) {
-                errs() << "\t - " << Function.getName() << "\n"; 
-            }
+
+            int totalUsage      = 0;
+            totalUsage += getGlobalsUsage(M);
+            totalUsage += getFunctionsUsage(M);
 
             return false;
         }
 
         int getGlobalsUsage(Module &M) {
             int output = 0;
-            errs() << "\nLooking at Global Variables" << "\n";
-            errs() << "\e[1m" << "\tVariable Name\t\t\tSize (Bits)" << "\e[0m" << "\n";
+            errs() << "\nLooking at Global Variables" << "\n\n";
+            errs() << "\tVariable Name\t\t\tSize (Bits)" << "\n";
+            errs() << "\t-------------------------------------------" << "\n";
             for (GlobalVariable &Global : M.getGlobalList()) {
                 string gVarName = Global.getName();
                 if (Global.getValueType()->isArrayTy()) {
@@ -48,7 +44,40 @@ namespace {
                 }
                 errs() << "\n";
             }
-            errs() << "\nGlobal Usage: " << output << " Bits\n";
+            errs() << "\e[1m" << "\nGlobal Usage: " << output << " Bits\n" <<  "\e[0m";
+            return output;
+        }
+
+        int getFunctionsUsage(Module &M) {
+            int output = 0;
+            errs() << "\nLooking at Functions:" << "\n";
+            for (Function &F: M.getFunctionList()) {
+                errs() << "\t" << F.getName() << ":\n";
+                output += getFunctionUsage(F);
+            }
+            return output;
+        }
+
+        int getFunctionUsage(Function &F) {
+            int output = 0;
+
+            errs() << "\tVariable Name\t\t\tSize (Bits)" << "\n";
+            errs() << "\t-------------------------------------------" << "\n";
+
+            for (auto bb = F.getBasicBlockList().rbegin(), e = F.getBasicBlockList().rend(); bb != e; ++bb) {
+                for (BasicBlock::reverse_iterator i = bb->rbegin(), e = bb->rend(); i != e; ++i) {
+                    // Declare all members.
+                    Instruction *currInst= &*i;
+                    output += getInstUsage(currInst);
+                }
+            }
+
+            return output;
+        }
+
+        int getInstUsage(Instruction* i) {
+            int output = 0;
+
             return output;
         }
 
