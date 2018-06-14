@@ -29,9 +29,36 @@ namespace {
             totalUsage += getGlobalsUsage(M);
             totalUsage += getFunctionsUsage(M);
 
-            errs() << "\e[1m" << "\n\nTOTAL STATIC USAGE: " << totalUsage << " Bits\n\n";
+            errs() << "\e[1m" << "\n\nTOTAL STATIC USAGE: " << totalUsage << " Bits\n\n" << "\e[0m";
+
+            /* Detect Recursion */
+            errs() << "\n\nFunction Leads To Recursion:";
+            for (auto mapEntry: functionCalls) {
+                SmallVector<Function*,64> callStack;
+                errs() << "\n" << mapEntry.first->getName() << "\t= " << isRecursive(mapEntry.first, callStack);
+            }
+            errs() << "\n";
 
             return false;
+        }
+
+        bool isRecursive(Function* func, SmallVector<Function*,64> callStack) {
+            bool output = false;
+            if (setContains(func, &callStack))
+                return true;
+            callStack.push_back(func);
+            for (Function* call: functionCalls[func]) {
+                output = output || isRecursive(call, callStack);
+            }
+            return output;
+        }
+
+        bool setContains(Function *target, SmallVector<Function*, 64> *set) {
+            bool output = false;
+            for (Function *elem: *set) {
+                if (elem == target) output = true;
+            }
+            return output;
         }
 
         int getGlobalsUsage(Module &M) {
@@ -53,7 +80,7 @@ namespace {
                 }
                 errs() << "\n";
             }
-            errs() << "\e[1m" << "\nGlobal Usage: " << output << " Bits\n" <<  "\e[0m";
+            errs() << "\e[1m" << "\nGlobal Usage: " << output << " Bits\n" << "\e[0m";
             return output;
         }
 
