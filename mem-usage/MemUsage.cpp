@@ -17,30 +17,137 @@ namespace {
 
     struct MemoryUsage : public ModulePass {
 
+        Function* main;
+        DenseMap<GlobalVariable*, int> globalsUsage;
+        DenseMap<Function*, set<Instruction*>> functionUsage;
         DenseMap<Function*, SmallVector<Function*,64>> functionCalls;
-        DenseMap<Function*, set<Instruction*>> functionVars;
 
         static char ID;
         MemoryUsage() : ModulePass(ID) {}
         virtual bool runOnModule(Module &M) {
-            errs() << "In a Module called " << M.getName() << "\n";
+            errs() << "Performing Static Analysis on Module: " << M.getName() << "\n";
 
-            int totalUsage      = 0;
-            totalUsage += getGlobalsUsage(M);
-            totalUsage += getFunctionsUsage(M);
-
-            errs() << "\e[1m" << "\n\nTOTAL STATIC USAGE: " << totalUsage << " Bits\n\n" << "\e[0m";
+            parseModule(M);
+            int staticUsage = getStaticUsage();
+            errs() << "\e[1m" << "\n\nTotal Static Usage:\t" << staticUsage << "\tBits\n\n" << "\e[0m";
 
             /* Detect Recursion */
-            errs() << "\n\nFunction Leads To Recursion:";
+            bool recursiveModule = false;
             for (auto mapEntry: functionCalls) {
                 SmallVector<Function*,64> callStack;
-                errs() << "\n" << mapEntry.first->getName() << "\t= " << isRecursive(mapEntry.first, callStack);
+                recursiveModule = recursiveModule || isRecursive(mapEntry.first, callStack);
             }
-            errs() << "\n";
 
+            if (recursiveModule)
+                errs() << "\nModule Contains Recursive Code - Analysis Finished";
+            else {
+                errs() << "\nAnalysing Max Memory Usage...\n";
+                int maxUsage = getGlobalsUsage();
+                maxUsage    += visitFunction(main);
+                errs() << "\nMax Memory Used:\t" << maxUsage << "\tBits";
+            }
+
+            // Debugging
+            errs() << "\n\n ---- DEBUGGING ---\n";
+
+            for (auto funcPair: functionUsage) {
+                errs() << "\n\n" << *funcPair.first;
+            }
+
+            errs() << "\n";
             return false;
         }
+
+        /* Dynamic Analysis */
+
+
+        int visitFunction(Function* f) {
+            int funcUsage = getFunctionUsage(f);
+            errs() << f->getName();
+            for (Function* call: functionCalls[f]) {
+                errs() << "->";
+                funcUsage += visitFunction(call);
+                errs() << "\n";
+            }
+            return funcUsage;
+        }
+
+        /* Static Analysis */
+
+        /* Parses the Module Populating Compiler Data Structures */
+        void parseModule(Module &M) {
+            /* Parse Globals */
+            for (GlobalVariable &Global : M.getGlobalList()) {
+                if (Global.getValueType()->isArrayTy())
+                    globalsUsage[&Global] = (Global.getValueType()->getArrayElementType()->getScalarSizeInBits() * Global.getValueType()->getArrayNumElements());
+                else
+                    globalsUsage[&Global] = Global.getValueType()->getScalarSizeInBits();
+            }
+
+            /* Parse Functions */
+            for (Function &F: M.getFunctionList()) {
+                if (F.getName() == "main")
+                    main = &F;
+                for (auto bb = F.getBasicBlockList().begin(), e = F.getBasicBlockList().end(); bb != e; ++bb) {
+                    for (BasicBlock::iterator i = bb->begin(), e = bb->end(); i != e; ++i) {
+                        Instruction *currInst= &*i;
+
+                        // If Instruction uses memory, store it.
+                        if (currInst->getType()->getScalarSizeInBits() > 0)
+                            functionUsage[&F].insert(currInst);
+
+                        // If Instruction is Function Call, store it.
+                        if (isa<CallInst>(currInst))
+                            functionCalls[&F].push_back(cast<CallInst>(currInst)->getCalledFunction());
+                    }
+                }
+            }
+        }
+
+        /* Calculates Static Usage of Current Module in Bits */
+        int getStaticUsage() {
+            int output = 0;
+
+            output += getGlobalsUsage();
+            errs() << "\nGlobal Variables Use: \t" << output << "\tBits";
+
+            output += getFunctionsUsage();
+
+            return output;
+        }
+
+        /* Sums Global Variables Usage */
+        int getGlobalsUsage() {
+            int output = 0;
+            for (auto gvPair: globalsUsage) {
+                output += gvPair.second;
+            }
+            return output;
+        }
+
+        /* Sums Usage of All Functions */
+        int getFunctionsUsage() {
+            int output = 0;
+            int currFuncUsage = 0;
+            errs() << "\nFunctions:";
+            for (auto funcPair: functionUsage) {
+                currFuncUsage = getFunctionUsage(funcPair.first);
+                errs() << "\n\t" << funcPair.first->getName() << " Uses:\t" << currFuncUsage << "\tBits";
+                output += currFuncUsage;
+            }
+            return output;
+        }
+
+        /* Sums Usage of a Function */
+        int getFunctionUsage(Function* f) {
+            int output = 0;
+            for (auto var: functionUsage[f]) {
+                output += var->getType()->getScalarSizeInBits();
+            }
+            return output;
+        }
+
+        /* Helpers */
 
         bool isRecursive(Function* func, SmallVector<Function*,64> callStack) {
             bool output = false;
@@ -58,109 +165,6 @@ namespace {
             for (Function *elem: *set) {
                 if (elem == target) output = true;
             }
-            return output;
-        }
-
-        int getGlobalsUsage(Module &M) {
-            int output = 0;
-            errs() << "\nLooking at Global Variables" << "\n\n";
-            errs() << "\tVariable Name\t\t\tSize (Bits)" << "\n";
-            errs() << "\t-------------------------------------------" << "\n";
-            for (GlobalVariable &Global : M.getGlobalList()) {
-                string gVarName = Global.getName();
-                if (Global.getValueType()->isArrayTy()) {
-                    int usage = (Global.getValueType()->getArrayElementType()->getScalarSizeInBits() * Global.getValueType()->getArrayNumElements());
-                    errs() << "\t" << gVarName << getTabs(gVarName) << usage << "\t- " << *Global.getValueType();
-                    output += usage;
-                }
-                else {
-                    int usage = Global.getValueType()->getScalarSizeInBits();
-                    errs() << "\t" << gVarName << getTabs(gVarName) << usage << "\t- " << *Global.getValueType();
-                    output += usage;
-                }
-                errs() << "\n";
-            }
-            errs() << "\e[1m" << "\nGlobal Usage: " << output << " Bits\n" << "\e[0m";
-            return output;
-        }
-
-        int getFunctionsUsage(Module &M) {
-            int output = 0;
-            errs() << "\nLooking at Functions:";
-            for (Function &F: M.getFunctionList()) {
-                SmallVector<Function*,64> currFunctionCalls;
-                functionCalls[&F] = currFunctionCalls;
-                errs() << "\n\n" << F.getName() << ":";
-                output += getFunctionUsage(F);
-            }
-            return output;
-        }
-
-        int getFunctionUsage(Function &F) {
-            int output = 0;
-
-            // Populate Data on Function.
-            for (auto bb = F.getBasicBlockList().rbegin(), e = F.getBasicBlockList().rend(); bb != e; ++bb) {
-                for (BasicBlock::reverse_iterator i = bb->rbegin(), e = bb->rend(); i != e; ++i) {
-                    Instruction *currInst= &*i;
-
-                    // If Instruction uses memory, store it.
-                    if (currInst->getType()->getScalarSizeInBits() > 0)
-                        functionVars[&F].insert(currInst);
-
-                    // If Instruction is Function Call, store it.
-                    if (isa<CallInst>(currInst))
-                        functionCalls[&F].push_back(cast<CallInst>(currInst)->getCalledFunction());
-                }
-            }
-
-            // Sum & Output Variable Allocations.
-            errs() << "\n\tVariable Name\t\t\tSize (Bits)" << "\n";
-            errs() << "\t-------------------------------------------";
-            for (Instruction* v: functionVars[&F]) {
-                int usage   = v->getType()->getScalarSizeInBits();
-                string name = v->getName();
-                if (name == "") name = "....";
-                errs() << "\n\t" << name << getTabs(name) << usage << "\t- " << *(v->getType());
-                output += usage;
-            }
-            errs() << "\n\t-------------------------------------------";
-            errs() << "\e[1m" << "\n\t\t\t\t\t" << output << " Bits \e[0m" << "\n";
-
-
-            // Output Function Calls.
-            errs() << "\n\tCalls Functions:" << "\n";
-            errs() << "\t-------------------------------------------";
-            for (Function* f: functionCalls[&F])
-                errs() << "\n\t" << f->getName() << "()";
-            errs() << "\n\t-------------------------------------------";
-
-
-            return output;
-        }
-
-        int getInstUsage(Instruction* i) {
-            int output = 0;
-
-
-
-            return output;
-        }
-
-        virtual int runOnFunction(Function &F) {
-            errs() << "\tIn a Function called " << F.getName() << "\n";
-            return 0;
-        }
-
-        string getTabs(const string &varName) {
-            // 16 Characters between.
-            int num = 4 - (varName.length() % 4);
-            string output = "";
-            for (int i=0; i < num; i++)
-                output += "\t";
-            if (varName.length() == 1) output += "\t";
-            if (varName.length() == 2) output += "\t\t";
-            if (varName.length() == 3) output += "\t\t\t";
             return output;
         }
 
